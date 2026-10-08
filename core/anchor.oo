@@ -1,0 +1,22 @@
+// # oocbor Core Module Anchor
+//
+// Logline: Integrates CBOR type models, binary codec, and structural layout inspectors.
+//
+// Setup: Bridges RFC 8949 binary encoders and decoders for consumers.
+//
+// Beats:
+//   1. Expose CBOR structure definitions and major type constants.
+//   2. Expose encoding and decoding pipeline routines.
+//   3. Provide core subsystem health verification predicate.
+
+import "core/cbor_types.oo";
+import "core/cbor_codec.oo";
+import "core/cbor_inspect.oo";
+
+pub fn verify_core_subsystem() -> Bool {
+    let hex: String = encode_simple_cbor("k", "v", "num", 42);
+    let bytes: List[Int] = hex_to_bytes(hex);
+    let doc: CborDoc = decode_cbor(bytes);
+    let items: List[CborItem] = inspect_cbor_items(bytes);
+    return doc.valid && (doc.item_count == 2) && (list_len(items) > 0);
+}

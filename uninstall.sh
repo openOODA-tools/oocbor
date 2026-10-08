@@ -4,7 +4,7 @@
 # "Removes oocbor binary, package installations, and cache."
 #
 # Usage:
-#   curl -fsSL https://openooda-toocbor.github.io/oocbor/uninstall.sh | bash
+#   curl -fsSL https://openooda-tools.github.io/oocbor/uninstall.sh | bash
 #   or: ./uninstall.sh [options]
 #
 # Options:

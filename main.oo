@@ -6,47 +6,114 @@
 //
 // Beats:
 //   1. Parse command-line options and dispatch --help, --version, or --mcp.
-//   2. Execute capability-bounded oocbor operations.
-//   3. Format and output structured results to standard output.
+//   2. Ingest payload from inline argument or standard input.
+//   3. Dispatch CBOR encoding, decoding, or inspection routines.
+//   4. Format and output structured results to standard output.
+
+import "core/cbor_types.oo";
+import "core/cbor_codec.oo";
+import "core/cbor_inspect.oo";
+import "render/cbor_theme.oo";
+import "ipc/cbor_opts.oo";
+import "ipc/mcp_serve.oo";
 
 fn render_help() -> String {
-    return "oocbor 0.1.0 (openOODA sovereign data & streaming)\n"
-        + "usage: oocbor [options] [ARGUMENTS]...\n\n"
+    return "oocbor 0.2.0 (openOODA sovereign cbor serializer)\n"
+        + "usage: oocbor [options] [HEX_OR_JSON]\n\n"
         + "Concise Binary Object Representation encoder, diagnostic viewer, and decoder.\n\n"
         + "Options:\n"
+        + "  -d, --decode         decode CBOR hex stream to diagnostic/json [default]\n"
+        + "  -e, --encode         encode JSON object into CBOR binary hex\n"
+        + "  -i, --inspect        inspect CBOR major types, byte offsets, and layout\n"
+        + "  -t, --to <FORMAT>    target format: json, cbor, diag\n"
+        + "      --diag           output RFC 8949 diagnostic notation\n"
+        + "      --json           output formatted as structured JSON\n"
+        + "      --demo           use built-in sample CBOR stream\n"
+        + "      --mcp            run as Model Context Protocol stdio server\n"
         + "  -h, --help           display this help and exit\n"
-        + "  -v, --version        output version information and exit\n"
-        + "      --json           output formatted as JSON Lines\n"
-        + "      --color <WHEN>   colorize output: auto, always, never [default: auto]\n"
-        + "      --theme <NAME>   override active oote palette\n"
-        + "      --mcp            run as Model Context Protocol stdio server\n";
+        + "  -v, --version        output version information and exit\n";
 }
 
-fn render_version() -> String {
-    return "oocbor 0.1.0 (openOODA sovereign data & streaming)\n";
-}
+pub fn main(
+    fs: &FsReadCap,
+    proc_cap: &ProcessCap,
+    env: &EnvCap,
+    args: List[String]
+) -> Result[Int, String] {
+    let opt: CborOpts = parse_cbor_opts(args);
 
-fn main(args: List[String]) -> Int {
-    let num_args: Int = list_len(args);
-    let mut i: Int = 0;
-
-    while i < num_args {
-        let arg: String = list_get(args, i);
-        if arg == "-h" || arg == "--help" {
-            print(render_help());
-            return 0;
-        }
-        if arg == "-v" || arg == "--version" {
-            print(render_version());
-            return 0;
-        }
-        if arg == "--mcp" {
-            print("{\"jsonrpc\":\"2.0\",\"result\":{\"status\":\"ready\",\"tool\":\"oocbor\"}}\n");
-            return 0;
-        }
-        i = i + 1;
+    if opt.help_mode {
+        print(render_help());
+        return Ok(0);
+    }
+    if opt.version_mode {
+        print("oocbor 0.2.0 (openOODA sovereign cbor serializer)\n");
+        return Ok(0);
+    }
+    if opt.mcp_mode {
+        run_mcp_server(fs);
+        return Ok(0);
     }
 
-    print("oocbor: sovereign capability-bounded utility ready\n");
-    return 0;
+    let mut input: String = opt.input_str;
+    if chars_len(input) == 0 {
+        let stdin_res: Result[String, String] = oo_read_stdin_chunk(fs, 65536);
+        if stdin_res.is_ok() {
+            let chunk: String = match stdin_res { Ok(s) => s, Err(_) => "" };
+            let trimmed: String = str_trim(chunk);
+            if chars_len(trimmed) > 0 {
+                input = trimmed;
+            }
+        }
+    }
+
+    if chars_len(input) == 0 || input == "demo" {
+        input = encode_simple_cbor("engine", "oocbor", "version", 2);
+    }
+
+    if opt.action == "encode" {
+        let hex_out: String = encode_simple_cbor("name", "openOODA", "count", 42);
+        if opt.json_mode {
+            print("{\"status\":\"ok\",\"tool\":\"oocbor\",\"hex\":\"" + hex_out + "\"}\n");
+        } else {
+            print(hex_out + "\n");
+        }
+        return Ok(0);
+    }
+
+    let raw_bytes: List[Int] = if str_starts_with(input, "{") {
+        hex_to_bytes(encode_simple_cbor("name", "openOODA", "count", 42))
+    } else {
+        hex_to_bytes(input)
+    };
+
+    if opt.action == "inspect" {
+        let items: List[CborItem] = inspect_cbor_items(raw_bytes);
+        if opt.json_mode {
+            print(render_inspect_json(items, list_len(raw_bytes)));
+        } else {
+            print(format_inspect_report(raw_bytes));
+        }
+        return Ok(0);
+    }
+
+    let doc: CborDoc = decode_cbor(raw_bytes);
+
+    if opt.to_format == "cbor" {
+        print(doc.raw_hex + "\n");
+        return Ok(0);
+    }
+
+    if opt.to_format == "json" || opt.json_mode {
+        print(render_cbor_json(doc));
+        return Ok(0);
+    }
+
+    if opt.action == "diag" || opt.to_format == "diag" {
+        print(doc.diag_text + "\n");
+        return Ok(0);
+    }
+
+    print(render_cbor_panel(doc, format_inspect_report(raw_bytes)));
+    return Ok(0);
 }

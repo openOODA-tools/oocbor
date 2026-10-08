@@ -1,0 +1,203 @@
+// # CBOR Encoding and Decoding Codec
+//
+// Logline: Encodes and decodes RFC 8949 Concise Binary Object Representation streams.
+//
+// Setup: Implements big-endian integer word layouts and major type header parsers.
+//
+// Beats:
+//   1. Hexadecimal and raw byte conversion utilities.
+//   2. Encode unsigned integers, text strings, maps, and booleans.
+//   3. Decode CBOR byte streams into structured JSON and diagnostic notation.
+//   4. Extract data items and map entries.
+
+import "core/cbor_types.oo";
+
+pub fn hex_to_bytes(hex_str: String) -> List[Int] {
+    let hex: String = "0123456789abcdef";
+    let len: Int = chars_len(hex_str);
+    let mut out: List[Int] = bytes_new();
+    let mut i: Int = 0;
+    while i + 1 < len {
+        let h_char: String = str_slice(hex_str, i, i + 1);
+        let l_char: String = str_slice(hex_str, i + 1, i + 2);
+        let mut hi: Int = 0;
+        let mut lo: Int = 0;
+        let mut k: Int = 0;
+        while k < 16 {
+            if str_slice(hex, k, k + 1) == h_char { hi = k; }
+            if str_slice(hex, k, k + 1) == l_char { lo = k; }
+            k = k + 1;
+        }
+        out = bytes_push(out, (hi * 16) + lo);
+        i = i + 2;
+    }
+    return out;
+}
+
+pub fn bytes_to_hex(bytes: List[Int]) -> String {
+    let hex: String = "0123456789abcdef";
+    let len: Int = list_len(bytes);
+    let mut out: String = "";
+    let mut i: Int = 0;
+    while i < len {
+        let b: Int = list_get(bytes, i);
+        let hi: Int = (b / 16) & 15;
+        let lo: Int = b & 15;
+        out = out + str_slice(hex, hi, hi + 1) + str_slice(hex, lo, lo + 1);
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn encode_header(buf: List[Int], major: Int, val: Int) -> List[Int] {
+    let mut b: List[Int] = buf;
+    let m_shift: Int = major * 32;
+    if val < 24 {
+        b = bytes_push(b, m_shift + val);
+    } else if val < 256 {
+        b = bytes_push(b, m_shift + 24);
+        b = bytes_push(b, val);
+    } else if val < 65536 {
+        b = bytes_push(b, m_shift + 25);
+        b = bytes_push(b, (val / 256) & 255);
+        b = bytes_push(b, val & 255);
+    } else {
+        b = bytes_push(b, m_shift + 26);
+        b = bytes_push(b, (val / 16777216) & 255);
+        b = bytes_push(b, (val / 65536) & 255);
+        b = bytes_push(b, (val / 256) & 255);
+        b = bytes_push(b, val & 255);
+    }
+    return b;
+}
+
+pub fn encode_text_string(buf: List[Int], s: String) -> List[Int] {
+    let len: Int = chars_len(s);
+    let mut b: List[Int] = encode_header(buf, 3, len);
+    let mut i: Int = 0;
+    while i < len {
+        b = bytes_push(b, byte_at(s, i));
+        i = i + 1;
+    }
+    return b;
+}
+
+pub fn encode_simple_cbor(k1: String, v1: String, k2: String, v2: Int) -> String {
+    let mut b: List[Int] = bytes_new();
+    b = encode_header(b, 5, 2);
+    b = encode_text_string(b, k1);
+    b = encode_text_string(b, v1);
+    b = encode_text_string(b, k2);
+    b = encode_header(b, 0, v2);
+    return bytes_to_hex(b);
+}
+
+pub fn decode_cbor(raw: List[Int]) -> CborDoc {
+    let len: Int = list_len(raw);
+    let hex_repr: String = bytes_to_hex(raw);
+    if len == 0 {
+        return make_cbor_doc(0, hex_repr, "{}", "{}", false);
+    }
+
+    let b0: Int = list_get(raw, 0);
+    let major: Int = (b0 / 32) & 7;
+    let info: Int = b0 & 31;
+
+    if major == 5 {
+        let pair_count: Int = info;
+        let mut json_out: String = "{";
+        let mut diag_out: String = "{";
+        let mut offset: Int = 1;
+        let mut p: Int = 0;
+
+        while p < pair_count && offset < len {
+            let k_hdr: Int = list_get(raw, offset);
+            let k_len: Int = k_hdr & 31;
+            let mut k_buf: List[Int] = bytes_new();
+            let mut ki: Int = 0;
+            while ki < k_len && (offset + 1 + ki) < len {
+                k_buf = bytes_push(k_buf, list_get(raw, offset + 1 + ki));
+                ki = ki + 1;
+            }
+            let k_str: String = bytes_to_str(k_buf);
+            offset = offset + 1 + k_len;
+
+            if p > 0 {
+                json_out = json_out + ",";
+                diag_out = diag_out + ", ";
+            }
+            json_out = json_out + "\"" + k_str + "\":";
+            diag_out = diag_out + "\"" + k_str + "\": ";
+
+            if offset < len {
+                let v_hdr: Int = list_get(raw, offset);
+                let v_major: Int = (v_hdr / 32) & 7;
+                let v_info: Int = v_hdr & 31;
+
+                if v_major == 3 {
+                    let mut v_buf: List[Int] = bytes_new();
+                    let mut vi: Int = 0;
+                    while vi < v_info && (offset + 1 + vi) < len {
+                        v_buf = bytes_push(v_buf, list_get(raw, offset + 1 + vi));
+                        vi = vi + 1;
+                    }
+                    let v_str: String = bytes_to_str(v_buf);
+                    offset = offset + 1 + v_info;
+                    json_out = json_out + "\"" + v_str + "\"";
+                    diag_out = diag_out + "\"" + v_str + "\"";
+                } else if v_major == 0 {
+                    let mut ival: Int = v_info;
+                    offset = offset + 1;
+                    if v_info == 24 && offset < len {
+                        ival = list_get(raw, offset);
+                        offset = offset + 1;
+                    }
+                    json_out = json_out + to_string(ival);
+                    diag_out = diag_out + to_string(ival);
+                } else if v_major == 7 {
+                    offset = offset + 1;
+                    if v_info == 21 {
+                        json_out = json_out + "true";
+                        diag_out = diag_out + "true";
+                    } else if v_info == 20 {
+                        json_out = json_out + "false";
+                        diag_out = diag_out + "false";
+                    } else {
+                        json_out = json_out + "null";
+                        diag_out = diag_out + "null";
+                    }
+                } else {
+                    offset = offset + 1;
+                    json_out = json_out + "\"unknown\"";
+                    diag_out = diag_out + "\"unknown\"";
+                }
+            }
+            p = p + 1;
+        }
+
+        json_out = json_out + "}";
+        diag_out = diag_out + "}";
+        return make_cbor_doc(pair_count, hex_repr, json_out, diag_out, true);
+    }
+
+    if major == 3 {
+        let str_len: Int = info;
+        let mut sbuf: List[Int] = bytes_new();
+        let mut i: Int = 0;
+        while i < str_len && (1 + i) < len {
+            sbuf = bytes_push(sbuf, list_get(raw, 1 + i));
+            i = i + 1;
+        }
+        let s: String = bytes_to_str(sbuf);
+        let j_str: String = "\"" + s + "\"";
+        return make_cbor_doc(1, hex_repr, j_str, j_str, true);
+    }
+
+    if major == 0 {
+        let ival: Int = info;
+        let num_str: String = to_string(ival);
+        return make_cbor_doc(1, hex_repr, num_str, num_str, true);
+    }
+
+    return make_cbor_doc(1, hex_repr, "{}", "{}", true);
+}

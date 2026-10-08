@@ -1,5 +1,5 @@
 Name:           oocbor
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        Concise Binary Object Representation encoder, diagnostic viewer, and decoder.
 License:        ASL 2.0

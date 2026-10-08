@@ -1,0 +1,77 @@
+// # oocbor Command-Line Options Parser
+//
+// Logline: Command-line flag tokenizer and configuration builder for CBOR actions.
+//
+// Setup: Parses arguments vector into structured execution parameters.
+//
+// Beats:
+//   1. Declare CborOpts structure with action and format flags.
+//   2. Iterate command arguments and assign operation modes.
+//   3. Handle format switches (--to json, cbor, diag).
+//   4. Provide default execution parameters.
+
+pub type CborOpts = struct {
+    action: String,
+    input_str: String,
+    to_format: String,
+    json_mode: Bool,
+    mcp_mode: Bool,
+    help_mode: Bool,
+    version_mode: Bool
+};
+
+pub fn default_cbor_opts() -> CborOpts {
+    return CborOpts {
+        action: "decode",
+        input_str: "",
+        to_format: "",
+        json_mode: false,
+        mcp_mode: false,
+        help_mode: false,
+        version_mode: false
+    };
+}
+
+pub fn parse_cbor_opts(args: List[String]) -> CborOpts {
+    let mut opts: CborOpts = default_cbor_opts();
+    let num_args: Int = list_len(args);
+    let mut i: Int = 0;
+
+    while i < num_args {
+        let arg: String = list_get(args, i);
+        if arg == "-h" || arg == "--help" {
+            opts.help_mode = true;
+        } else if arg == "-v" || arg == "--version" {
+            opts.version_mode = true;
+        } else if arg == "--mcp" {
+            opts.mcp_mode = true;
+        } else if arg == "--json" {
+            opts.json_mode = true;
+        } else if arg == "-d" || arg == "--decode" {
+            opts.action = "decode";
+        } else if arg == "-e" || arg == "--encode" {
+            opts.action = "encode";
+        } else if arg == "-i" || arg == "--inspect" {
+            opts.action = "inspect";
+        } else if arg == "--diag" {
+            opts.action = "diag";
+        } else if arg == "--demo" {
+            opts.input_str = "demo";
+        } else if (arg == "-t" || arg == "--to") && (i + 1 < num_args) {
+            i = i + 1;
+            opts.to_format = list_get(args, i);
+        } else if (arg == "-s" || arg == "--string") && (i + 1 < num_args) {
+            i = i + 1;
+            opts.input_str = list_get(args, i);
+        } else if !str_starts_with(arg, "-") && chars_len(opts.input_str) == 0 {
+            opts.input_str = arg;
+        }
+        i = i + 1;
+    }
+
+    if chars_len(opts.input_str) > 0 && str_starts_with(opts.input_str, "{") && opts.action == "decode" {
+        opts.action = "encode";
+    }
+
+    return opts;
+}

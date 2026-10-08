@@ -1,0 +1,120 @@
+// # CBOR Structural Item Inspector
+//
+// Logline: Generates structural layout breakdowns with major type labels and byte offsets.
+//
+// Setup: Inspects raw CBOR byte payloads and constructs diagnostic item models.
+//
+// Beats:
+//   1. Parse root header and determine major type category.
+//   2. Iterate child elements and calculate exact byte offsets.
+//   3. Format inspection table with offset, header hex, and value.
+//   4. Export item list for structured JSON serialization.
+
+import "core/cbor_types.oo";
+import "core/cbor_codec.oo";
+
+pub fn sub_hex(raw: List[Int], start: Int, end: Int) -> String {
+    let mut b: List[Int] = bytes_new();
+    let mut i: Int = start;
+    let n: Int = list_len(raw);
+    while i < end && i < n {
+        b = bytes_push(b, list_get(raw, i));
+        i = i + 1;
+    }
+    return bytes_to_hex(b);
+}
+
+pub fn inspect_cbor_items(raw: List[Int]) -> List[CborItem] {
+    let mut items: List[CborItem] = list_new();
+    let len: Int = list_len(raw);
+    if len == 0 {
+        return items;
+    }
+
+    let b0: Int = list_get(raw, 0);
+    let root_major: Int = (b0 / 32) & 7;
+    let root_info: Int = b0 & 31;
+    let root_hex: String = sub_hex(raw, 0, 1);
+
+    items = list_push(items, make_cbor_item(
+        root_major,
+        root_info,
+        major_type_name(root_major),
+        "root (" + major_type_name(root_major) + ")",
+        0,
+        root_hex
+    ));
+
+    if root_major == 5 {
+        let pair_count: Int = root_info;
+        let mut offset: Int = 1;
+        let mut p: Int = 0;
+
+        while p < pair_count && offset < len {
+            if offset >= len { p = pair_count; }
+            let k_hdr: Int = list_get(raw, offset);
+            let k_len: Int = k_hdr & 31;
+            let mut k_buf: List[Int] = bytes_new();
+            let mut ki: Int = 0;
+            while ki < k_len && (offset + 1 + ki) < len {
+                k_buf = bytes_push(k_buf, list_get(raw, offset + 1 + ki));
+                ki = ki + 1;
+            }
+            let k_str: String = bytes_to_str(k_buf);
+            let k_hex: String = sub_hex(raw, offset, offset + 1 + k_len);
+
+            items = list_push(items, make_cbor_item(
+                3,
+                k_len,
+                k_str,
+                "key: \"" + k_str + "\"",
+                offset,
+                k_hex
+            ));
+            offset = offset + 1 + k_len;
+
+            if offset < len {
+                let v_hdr: Int = list_get(raw, offset);
+                let v_major: Int = (v_hdr / 32) & 7;
+                let v_info: Int = v_hdr & 31;
+
+                if v_major == 3 {
+                    let mut v_buf: List[Int] = bytes_new();
+                    let mut vi: Int = 0;
+                    while vi < v_info && (offset + 1 + vi) < len {
+                        v_buf = bytes_push(v_buf, list_get(raw, offset + 1 + vi));
+                        vi = vi + 1;
+                    }
+                    let v_str: String = bytes_to_str(v_buf);
+                    let v_hex: String = sub_hex(raw, offset, offset + 1 + v_info);
+                    items = list_push(items, make_cbor_item(3, v_info, v_str, "val: \"" + v_str + "\"", offset, v_hex));
+                    offset = offset + 1 + v_info;
+                } else if v_major == 0 {
+                    let v_hex: String = sub_hex(raw, offset, offset + 1);
+                    items = list_push(items, make_cbor_item(0, v_info, to_string(v_info), "val: " + to_string(v_info), offset, v_hex));
+                    offset = offset + 1;
+                } else {
+                    let v_hex: String = sub_hex(raw, offset, offset + 1);
+                    items = list_push(items, make_cbor_item(v_major, v_info, "", "val: " + major_type_name(v_major), offset, v_hex));
+                    offset = offset + 1;
+                }
+            }
+            p = p + 1;
+        }
+    }
+
+    return items;
+}
+
+pub fn format_inspect_report(raw: List[Int]) -> String {
+    let items: List[CborItem] = inspect_cbor_items(raw);
+    let count: Int = list_len(items);
+    let mut out: String = "CBOR Stream Layout (" + to_string(list_len(raw)) + " bytes):\n";
+    let mut i: Int = 0;
+    while i < count {
+        let it: CborItem = list_get(items, i);
+        out = out + "  [" + to_string(it.offset) + "] " + it.raw_hex + " (" + major_type_name(it.major_type) + "): " + it.diag_repr + "\n";
+        i = i + 1;
+    }
+    return out;
+}

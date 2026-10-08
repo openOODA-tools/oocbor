@@ -1,0 +1,61 @@
+// # CBOR Data Types and Structures
+//
+// Logline: Data models for Concise Binary Object Representation items, maps, and diagnostics.
+//
+// Setup: Demands RFC 8949 major type definitions and openOODA scalar types.
+//
+// Beats:
+//   1. Define major type integer constants (0..7).
+//   2. Declare CborItem and CborDoc data structures.
+//   3. Provide major type name resolver.
+//   4. Construct item and document records.
+
+pub fn major_type_name(major: Int) -> String {
+    if major == 0 { return "unsigned integer"; }
+    if major == 1 { return "negative integer"; }
+    if major == 2 { return "byte string"; }
+    if major == 3 { return "text string"; }
+    if major == 4 { return "array"; }
+    if major == 5 { return "map"; }
+    if major == 6 { return "semantic tag"; }
+    if major == 7 { return "primitive/float"; }
+    return "unknown";
+}
+
+pub type CborItem = struct {
+    major_type: Int,
+    int_val: Int,
+    text_val: String,
+    diag_repr: String,
+    offset: Int,
+    raw_hex: String
+};
+
+pub type CborDoc = struct {
+    item_count: Int,
+    raw_hex: String,
+    json_text: String,
+    diag_text: String,
+    valid: Bool
+};
+
+pub fn make_cbor_item(major: Int, ival: Int, sval: String, diag: String, off: Int, hex: String) -> CborItem {
+    return CborItem {
+        major_type: major,
+        int_val: ival,
+        text_val: sval,
+        diag_repr: diag,
+        offset: off,
+        raw_hex: hex
+    };
+}
+
+pub fn make_cbor_doc(count: Int, hex: String, json: String, diag: String, ok: Bool) -> CborDoc {
+    return CborDoc {
+        item_count: count,
+        raw_hex: hex,
+        json_text: json,
+        diag_text: diag,
+        valid: ok
+    };
+}

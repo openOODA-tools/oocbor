@@ -1,0 +1,74 @@
+// # CBOR Visual Theme and JSON Serialization
+//
+// Logline: Formats CBOR diagnostic notation cards, byte streams, and JSON envelopes.
+//
+// Setup: Bridges oote terminal palettes and structured JSON for humans and agents.
+//
+// Beats:
+//   1. Define ANSI styling tokens and header borders.
+//   2. Render human-readable CBOR diagnostic inspection cards.
+//   3. Render structured JSON representations of CBOR documents.
+//   4. Render structural item breakdown lists as JSON arrays.
+
+import "core/cbor_types.oo";
+
+fn esc() -> String {
+    return bytes_to_str(bytes_push(bytes_new(), 27));
+}
+
+pub fn render_ansi_header() -> String {
+    let e: String = esc();
+    let bold: String = e + "[1m";
+    let cyan: String = e + "[38;5;51m";
+    let reset: String = e + "[0m";
+    return cyan + bold + "=== oocbor: Sovereign CBOR SERIALIZER ===" + reset + "\n";
+}
+
+pub fn render_cbor_panel(doc: CborDoc, inspect_str: String) -> String {
+    let e: String = esc();
+    let bold: String = e + "[1m";
+    let green: String = e + "[38;5;82m";
+    let yellow: String = e + "[38;5;220m";
+    let dim: String = e + "[38;5;242m";
+    let reset: String = e + "[0m";
+
+    let mut out: String = render_ansi_header();
+    out = out + dim + "----------------------------------------" + reset + "\n";
+    out = out + bold + "Item Count:   " + reset + to_string(doc.item_count) + "\n";
+    out = out + bold + "Payload Hex:  " + reset + yellow + doc.raw_hex + reset + "\n";
+    out = out + bold + "Diagnostic:   " + reset + green + doc.diag_text + reset + "\n";
+    out = out + bold + "JSON Output:  " + reset + doc.json_text + "\n";
+    out = out + dim + "----------------------------------------" + reset + "\n";
+    out = out + inspect_str;
+    return out;
+}
+
+pub fn render_cbor_json(doc: CborDoc) -> String {
+    return "{\"status\":\"ok\",\"tool\":\"oocbor\","
+        + "\"item_count\":" + to_string(doc.item_count) + ","
+        + "\"hex\":\"" + doc.raw_hex + "\","
+        + "\"diagnostic\":\"" + doc.diag_text + "\","
+        + "\"json\":" + doc.json_text + "}\n";
+}
+
+pub fn render_inspect_json(items: List[CborItem], byte_count: Int) -> String {
+    let mut arr: String = "[";
+    let count: Int = list_len(items);
+    let mut i: Int = 0;
+    while i < count {
+        let it: CborItem = list_get(items, i);
+        if i > 0 { arr = arr + ","; }
+        arr = arr + "{\"offset\":" + to_string(it.offset) + ","
+            + "\"major_type\":" + to_string(it.major_type) + ","
+            + "\"type_name\":\"" + major_type_name(it.major_type) + "\","
+            + "\"raw_hex\":\"" + it.raw_hex + "\","
+            + "\"diagnostic\":\"" + it.diag_repr + "\"}";
+        i = i + 1;
+    }
+    arr = arr + "]";
+
+    return "{\"status\":\"ok\",\"tool\":\"oocbor\","
+        + "\"byte_count\":" + to_string(byte_count) + ","
+        + "\"item_count\":" + to_string(count) + ","
+        + "\"items\":" + arr + "}\n";
+}

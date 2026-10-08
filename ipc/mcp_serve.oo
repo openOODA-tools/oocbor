@@ -1,0 +1,142 @@
+// # oocbor Model Context Protocol (MCP) Server
+//
+// Logline: JSON-RPC 2.0 stdio server providing CBOR encoding, decoding, and inspection tools.
+//
+// Setup: Zero-leakage capability-bounded request router over standard input/output.
+//
+// Beats:
+//   1. Handle MCP initialize and protocol version negotiation.
+//   2. Advertise cbor_decode, cbor_encode, cbor_inspect, cbor_diag, and cbor_stats tools.
+//   3. Dispatch tools/call requests and format JSON-RPC responses.
+//   4. Process streaming stdio request loop.
+
+import "core/cbor_types.oo";
+import "core/cbor_codec.oo";
+import "core/cbor_inspect.oo";
+import "ipc/json_field.oo";
+
+pub fn mcp_tools_list(id_val: String) -> String {
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id_val + ",\"result\":{\"tools\":["
+        + "{\"name\":\"cbor_decode\",\"description\":\"Decode CBOR hex payload into JSON and diagnostic notation.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"hex\":{\"type\":\"string\"}},\"required\":[\"hex\"]}},"
+        + "{\"name\":\"cbor_encode\",\"description\":\"Encode simple key-value pairs into CBOR hex payload.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"key\":{\"type\":\"string\"},\"val_str\":{\"type\":\"string\"},\"key_int\":{\"type\":\"string\"},\"val_int\":{\"type\":\"integer\"}},\"required\":[\"key\",\"val_str\"]}},"
+        + "{\"name\":\"cbor_inspect\",\"description\":\"Inspect CBOR item layout, major types, and byte offsets.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"hex\":{\"type\":\"string\"}},\"required\":[\"hex\"]}},"
+        + "{\"name\":\"cbor_diag\",\"description\":\"Format CBOR hex payload into RFC 8949 diagnostic notation.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"hex\":{\"type\":\"string\"}},\"required\":[\"hex\"]}},"
+        + "{\"name\":\"cbor_stats\",\"description\":\"Compute CBOR payload statistics and item counts.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"hex\":{\"type\":\"string\"}},\"required\":[\"hex\"]}}"
+        + "]}}\n";
+}
+
+pub fn handle_decode(id_val: String, args: String) -> String {
+    let hex_val: String = json_get_string(args, "hex");
+    let raw: List[Int] = hex_to_bytes(hex_val);
+    let doc: CborDoc = decode_cbor(raw);
+
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id_val + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+        + "JSON: " + json_escape_string(doc.json_text) + "\\n"
+        + "Diagnostic: " + json_escape_string(doc.diag_text) + "\\n"
+        + "Items: " + to_string(doc.item_count) + "\""
+        + "}]}}\n";
+}
+
+pub fn handle_encode(id_val: String, args: String) -> String {
+    let k: String = json_get_string(args, "key");
+    let vs: String = json_get_string(args, "val_str");
+    let ki: String = json_get_string(args, "key_int");
+    let vi_str: String = json_get_field(args, "val_int");
+    let mut vi: Int = 0;
+    let n: Int = chars_len(vi_str);
+    let mut i: Int = 0;
+    while i < n {
+        let ch: Int = byte_at(vi_str, i);
+        if ch >= 48 && ch <= 57 { vi = (vi * 10) + (ch - 48); }
+        i = i + 1;
+    }
+
+    let hex_res: String = encode_simple_cbor(k, vs, ki, vi);
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id_val + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+        + "Hex: " + hex_res + "\""
+        + "}]}}\n";
+}
+
+pub fn handle_inspect(id_val: String, args: String) -> String {
+    let hex_val: String = json_get_string(args, "hex");
+    let raw: List[Int] = hex_to_bytes(hex_val);
+    let report: String = format_inspect_report(raw);
+
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id_val + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+        + json_escape_string(report) + "\""
+        + "}]}}\n";
+}
+
+pub fn handle_diag(id_val: String, args: String) -> String {
+    let hex_val: String = json_get_string(args, "hex");
+    let raw: List[Int] = hex_to_bytes(hex_val);
+    let doc: CborDoc = decode_cbor(raw);
+
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id_val + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+        + json_escape_string(doc.diag_text) + "\""
+        + "}]}}\n";
+}
+
+pub fn handle_stats(id_val: String, args: String) -> String {
+    let hex_val: String = json_get_string(args, "hex");
+    let raw: List[Int] = hex_to_bytes(hex_val);
+    let doc: CborDoc = decode_cbor(raw);
+
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id_val + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+        + "Bytes: " + to_string(list_len(raw)) + "\\n"
+        + "Item Count: " + to_string(doc.item_count) + "\\n"
+        + "Valid: " + to_string(doc.valid) + "\""
+        + "}]}}\n";
+}
+
+pub fn handle_mcp_line(line: String) -> String {
+    let trimmed: String = str_trim(line);
+    if chars_len(trimmed) == 0 { return ""; }
+
+    let id_val: String = json_get_field(trimmed, "id");
+    let mut eff_id: String = "null";
+    if chars_len(id_val) > 0 { eff_id = id_val; }
+
+    let method: String = json_get_string(trimmed, "method");
+    if method == "initialize" {
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + eff_id + ",\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"oocbor\",\"version\":\"0.2.0\"}}}\n";
+    }
+    if method == "tools/list" {
+        return mcp_tools_list(eff_id);
+    }
+    if method == "tools/call" {
+        let params: String = json_get_field(trimmed, "params");
+        let name: String = json_get_string(params, "name");
+        let args: String = json_get_field(params, "arguments");
+
+        if name == "cbor_decode" { return handle_decode(eff_id, args); }
+        if name == "cbor_encode" { return handle_encode(eff_id, args); }
+        if name == "cbor_inspect" { return handle_inspect(eff_id, args); }
+        if name == "cbor_diag" { return handle_diag(eff_id, args); }
+        if name == "cbor_stats" { return handle_stats(eff_id, args); }
+
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + eff_id + ",\"error\":{\"code\":-32601,\"message\":\"Unknown tool\"}}\n";
+    }
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + eff_id + ",\"result\":{}}\n";
+}
+
+pub fn run_mcp_server(fs: &FsReadCap) {
+    let mut running: Bool = true;
+    while running {
+        let line_res: Result[String, String] = oo_read_stdin_chunk(fs, 8192);
+        if !line_res.is_ok() {
+            running = false;
+        } else {
+            let line: String = match line_res { Ok(s) => s, Err(_) => "" };
+            let trimmed: String = str_trim(line);
+            if chars_len(trimmed) == 0 {
+                running = false;
+            } else {
+                let resp: String = handle_mcp_line(trimmed);
+                if chars_len(resp) > 0 {
+                    print(resp);
+                }
+            }
+        }
+    }
+}

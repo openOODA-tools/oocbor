@@ -1,0 +1,20 @@
+// # oocbor Render Module Anchor
+//
+// Logline: Anchors CBOR visualization, terminal diagnostic cards, and JSON rendering primitives.
+//
+// Setup: Demands CBOR document models and theme formatting routines.
+//
+// Beats:
+//   1. Expose terminal color cards and formatting functions.
+//   2. Expose structured JSON encoders for CBOR documents and item breakdowns.
+//   3. Provide render subsystem health verification predicate.
+
+import "core/cbor_types.oo";
+import "render/cbor_theme.oo";
+
+pub fn verify_render_subsystem() -> Bool {
+    let doc: CborDoc = make_cbor_doc(1, "a1", "{}", "{}", true);
+    let panel: String = render_cbor_panel(doc, "");
+    let json: String = render_cbor_json(doc);
+    return chars_len(panel) > 0 && chars_len(json) > 0;
+}
